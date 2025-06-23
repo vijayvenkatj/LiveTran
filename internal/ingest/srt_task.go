@@ -2,25 +2,27 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+
 	"github.com/datarhei/gosrt"
 )
 
 
-func SrtConnectionTask(ctx context.Context,streamId string) {
+func SrtConnectionTask(ctx context.Context,streamId string) error {
 
 	port,err := getFreePort()
 	if err != nil {
 		fmt.Println("PORT error:",err)
-		return
+		return err
 	}
 
 	addr := fmt.Sprintf(":%d",port)
 	listener, err := srt.Listen("srt", addr, srt.DefaultConfig())
 	if err != nil {
 		fmt.Println("SRT Listener error:", err)
-		return
+		return err
 	}
 
 	defer listener.Close()
@@ -64,7 +66,7 @@ func SrtConnectionTask(ctx context.Context,streamId string) {
 		case <- ctx.Done():
 			fmt.Println(context.Cause(ctx))
 			listener.Close()
-			return
+			return errors.New("srt connection closed by user")
 		case err := <- errChan:
 			fmt.Println("ERROR: ",err)
 			continue
@@ -78,7 +80,7 @@ func SrtConnectionTask(ctx context.Context,streamId string) {
 			conn,err := req.Accept()
 			if err != nil {
 				fmt.Println("SRT Request Error : ",err)
-				return 
+				return err
 			}
 
 			handleStream(conn)
@@ -87,6 +89,11 @@ func SrtConnectionTask(ctx context.Context,streamId string) {
 
 }
 
+/*	
+	TODO: 
+		After The pod gets an OBS url, We send it to the user using webhooks.
+		We add a Status to each job. -> Initialising, Ready, Streaming, Stopped
+*/
 
 func handleStream(conn srt.Conn) {
 	defer conn.Close()

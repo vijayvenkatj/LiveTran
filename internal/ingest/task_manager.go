@@ -9,16 +9,14 @@ import (
 
 type TaskManager struct {
 	mu		sync.Mutex
-	wg 	    *sync.WaitGroup
 	TaskMap	map[string]context.CancelCauseFunc
 }
 
 
 // Constuctor
 
-func NewTaskManager(wg *sync.WaitGroup) *TaskManager {
+func NewTaskManager() *TaskManager {
 	return &TaskManager{
-		wg: wg,
 		TaskMap: make(map[string]context.CancelCauseFunc),
 	}
 }
@@ -32,19 +30,21 @@ func (tm *TaskManager) StartTask(id string) {
 
 	if _, exists := tm.TaskMap[id]; exists {
 		fmt.Println("Job exists!")
-		// Re-Connection logic ???
 		return 
 	}
 
 	cancelCtx,cancelFunc := context.WithCancelCause(context.Background())
 	tm.TaskMap[id] = cancelFunc
 
-	tm.wg.Add(1)
 
 	go func() {
-		defer tm.wg.Done()
-		SrtConnectionTask(cancelCtx,id)
+		err := SrtConnectionTask(cancelCtx,id)
+		if err != nil {
+			fmt.Println(err)
+			// Reconnection logic??
+		}
 	}()
+
 }
 
 // Stopping a task
