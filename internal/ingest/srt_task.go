@@ -2,34 +2,39 @@ package ingest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/datarhei/gosrt"
 )
 
 
-func SrtConnectionTask(ctx context.Context,streamId string) error {
+func SrtConnectionTask(ctx context.Context,task *Task) {
 
 	port,err := getFreePort()
 	if err != nil {
-		fmt.Println("PORT error:",err)
-		return err
+		task.UpdateStatus(StreamStopped,fmt.Sprintf("PORT error: %s",err))
+		return
 	}
 
 	addr := fmt.Sprintf(":%d",port)
 	listener, err := srt.Listen("srt", addr, srt.DefaultConfig())
 	if err != nil {
-		fmt.Println("SRT Listener error:", err)
-		return err
+		task.UpdateStatus(StreamStopped,fmt.Sprintf("SRT Listener error: %s",err))
+		return
 	}
 
 	defer listener.Close()
 
 	ip := GetLocalIP()
-	url := fmt.Sprintf("srt://%s:%d?streamid=%s",ip,port,streamId)
-	fmt.Println("OBS URL : ", url)
+	url := fmt.Sprintf("srt://%s:%d?streamid=%s",ip,port,task.Id)
+
+	task.UpdateStatus(StreamReady,fmt.Sprintf("The stream is ready! URL -> %s",url))
+
+	defer close(task.UpdatesChan)
+
+
 
 	/*
 	PROBLEM:
@@ -63,15 +68,28 @@ func SrtConnectionTask(ctx context.Context,streamId string) error {
 
 	for {
 		select {
+		
+		// User stops the stream.
 		case <- ctx.Done():
-			fmt.Println(context.Cause(ctx))
 			listener.Close()
-			return errors.New("srt connection closed by user")
+			task.UpdateStatus(StreamStopped, fmt.Sprintf("Stream is stopped : %v", context.Cause(ctx)))
+			return 
+
+		// SRT connection timeout because of inactivity.
+		case <- time.After(120*time.Second):
+			listener.Close()
+			task.UpdateStatus(StreamStopped,"TIMEOUT due to inactivity!")
+			return
+		
+		// Error from the Accept2() routine
 		case err := <- errChan:
 			fmt.Println("ERROR: ",err)
 			continue
+		
+		// Request gets detected by the Accept2() routine.
 		case req := <- reqChan:
-			if req.StreamId() != streamId {
+
+			if req.StreamId() != task.Id {
 				req.Reject(srt.REJ_BADSECRET)
 				fmt.Println("SRT ERROR: StreamId does not match.")
 				continue
@@ -80,36 +98,40 @@ func SrtConnectionTask(ctx context.Context,streamId string) error {
 			conn,err := req.Accept()
 			if err != nil {
 				fmt.Println("SRT Request Error : ",err)
-				return err
+				return
 			}
 
-			handleStream(conn)
+			task.UpdateStatus(StreamActive,"Your stream is now live!")
+			handleStream(ctx,conn,task)
 		}
 	}
 
 }
 
-/*	
-	TODO: 
-		After The pod gets an OBS url, We send it to the user using webhooks.
-		We add a Status to each job. -> Initialising, Ready, Streaming, Stopped
-*/
 
-func handleStream(conn srt.Conn) {
+func handleStream(ctx context.Context,conn srt.Conn,task *Task) {
 	defer conn.Close()
 	buf := make([]byte, 1316) // 1316 bytes is a typical MPEG-TS packet size
+
+	go func(){
+		<- ctx.Done()
+		conn.Close()
+	}()
 
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			fmt.Println("Connection closed or errored:", err)
+			task.UpdateStatus(StreamReady,fmt.Sprintf("Connection closed : %s",err))
 			return
 		}
 
-		// process the incoming stream data (e.g., forward to FFmpeg)
+		// TODO: process the incoming stream data (e.g., forward to FFmpeg)
 		fmt.Printf("Received %d bytes\n", n)
 	}
 }
+
+
+
 
 
 func GetLocalIP() string {

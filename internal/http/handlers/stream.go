@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -23,7 +24,7 @@ func (handler *Handler) StartStream(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (handler *Handler) StopStream (w http.ResponseWriter, r *http.Request) {
+func (handler *Handler) StopStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	handler.tm.StopTask("1",errors.New("user initiated request"))
@@ -31,5 +32,25 @@ func (handler *Handler) StopStream (w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
 		Data:    "Stream stopped!",
+	})
+}
+
+func (handler *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type","application/json")
+
+	task,exists := handler.tm.TaskMap["1"]
+	if exists {
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(Response{
+		Success: true,
+		Data: fmt.Sprintf("Status: %s",task.Status),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(Response{
+		Success: false,
+		Error: "Task not found",
 	})
 }
