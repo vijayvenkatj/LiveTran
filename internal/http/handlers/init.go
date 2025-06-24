@@ -24,6 +24,7 @@ func (h *Handler) StreamRoutes() *http.ServeMux {
 
 	mux.HandleFunc("GET /start-stream",h.StartStream)
 	mux.HandleFunc("GET /stop-stream",h.StopStream)
+	mux.HandleFunc("GET /status", h.Status)
 
 
 	return mux
