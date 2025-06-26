@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/datarhei/gosrt"
@@ -34,7 +36,62 @@ func SrtConnectionTask(ctx context.Context,task *Task) {
 
 	defer close(task.UpdatesChan)
 
+	handleStream(ctx,listener,task)
+}
 
+
+func handleStream(ctx context.Context, listener srt.Listener, task *Task) {
+
+	for {
+
+		select {
+
+		case <- ctx.Done():
+			task.UpdateStatus(StreamStopped,fmt.Sprintf("Stream Stopped: %s",context.Cause(ctx)))
+			return
+
+		default:
+
+			cancelCtx,cancel := context.WithTimeout(ctx,120*time.Second) // Adding deadline to the ctx
+			
+			req,err := WaitForConnection(cancelCtx,listener,task)
+			cancel() // Resourse Cleanup
+
+			if err != nil {
+				task.UpdateStatus(StreamStopped,fmt.Sprintf("Listener error: %s",err))
+				return
+			}
+
+			conn,err := req.Accept()
+			if err != nil {
+				task.UpdateStatus(StreamActive,fmt.Sprintf("Accept failed : %s",err))
+				continue 
+			}
+			task.UpdateStatus(StreamActive,"OBS connected!")
+
+			err = ProcessStream(ctx,conn,task)
+			if err != nil {
+				task.UpdateStatus(StreamReady,fmt.Sprintf("Processing error: %s",err))
+				continue
+			}
+
+		}
+	}
+
+}
+
+func WaitForConnection(ctx context.Context, listener srt.Listener, task *Task) (srt.ConnRequest, error) {
+	type result struct {
+		req srt.ConnRequest
+		err error
+	}
+
+	resultCh := make(chan result, 1)
+
+	go func() {
+		req, err := listener.Accept2()
+		resultCh <- result{req, err}
+	}()
 
 	/*
 	PROBLEM:
@@ -47,90 +104,88 @@ func SrtConnectionTask(ctx context.Context,task *Task) {
 			IF Connection is found add it to reqChan
 	*/
 
-	errChan := make(chan error,1)
-	reqChan := make(chan srt.ConnRequest,1)
 
-	go func() {
-		for {
-			select {
-			case <- ctx.Done():
-				return 
-			default:
-				req,err := listener.Accept2()
-				if err != nil {
-					errChan <- err
-					return 
-				}
-				reqChan <- req
-			}
+	select {
+
+	case <-ctx.Done():
+		cause := context.Cause(ctx)
+		if (cause == context.DeadlineExceeded){
+			task.UpdateStatus(StreamStopped,"TIMEOUT")
+			return nil,ctx.Err()
 		}
-	}()
+		task.UpdateStatus(StreamStopped,"User stopped the stream!")
 
-	for {
-		select {
-		
-		// User stops the stream.
-		case <- ctx.Done():
-			listener.Close()
-			task.UpdateStatus(StreamStopped, fmt.Sprintf("Stream is stopped : %v", context.Cause(ctx)))
-			return 
+		return nil, ctx.Err()
 
-		// SRT connection timeout because of inactivity.
-		case <- time.After(120*time.Second):
-			listener.Close()
-			task.UpdateStatus(StreamStopped,"TIMEOUT due to inactivity!")
-			return
-		
-		// Error from the Accept2() routine
-		case err := <- errChan:
-			fmt.Println("ERROR: ",err)
-			continue
-		
-		// Request gets detected by the Accept2() routine.
-		case req := <- reqChan:
+	case res := <-resultCh:
 
-			if req.StreamId() != task.Id {
-				req.Reject(srt.REJ_BADSECRET)
-				fmt.Println("SRT ERROR: StreamId does not match.")
-				continue
-			}
-
-			conn,err := req.Accept()
-			if err != nil {
-				fmt.Println("SRT Request Error : ",err)
-				return
-			}
-
-			task.UpdateStatus(StreamActive,"Your stream is now live!")
-			handleStream(ctx,conn,task)
+		if res.err != nil {
+			return nil, res.err
 		}
+
+		if res.req.StreamId() != task.Id {
+			res.req.Reject(srt.REJ_BADSECRET)
+			return WaitForConnection(ctx, listener, task)
+		}
+
+		return res.req, nil
 	}
-
 }
 
 
-func handleStream(ctx context.Context,conn srt.Conn,task *Task) {
-	defer conn.Close()
-	buf := make([]byte, 1316) // 1316 bytes is a typical MPEG-TS packet size
+
+func ProcessStream(ctx context.Context,conn srt.Conn,task *Task) error {
+	
+	cmd := exec.Command("ffmpeg",
+		"-f", "mpegts",
+		"-i", "pipe:0",
+		"-c:v", "copy",
+		"-c:a", "copy",
+		"-movflags", "+faststart",
+		fmt.Sprintf("output/%s-%d.mp4", task.Id, time.Now().Unix()),
+	)
+
+	stdin,err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("FFmpeg stdin error: %s", err)
+	} 
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		return fmt.Errorf("FFmpeg start error: %s", err)
+	}
 
 	go func(){
 		<- ctx.Done()
+		task.UpdateStatus(StreamStopped,"User stopped the stream!")
+		stdin.Close()
 		conn.Close()
+		_ = cmd.Process.Signal(os.Interrupt)
+		cmd.Wait()
 	}()
+
+	buf := make([]byte,1316)
 
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			task.UpdateStatus(StreamReady,fmt.Sprintf("Connection closed : %s",err))
-			return
+			stdin.Close()
+			if err := cmd.Wait(); err != nil {
+				return fmt.Errorf("FFmpeg exited with error: %v", err)
+			}
+			return fmt.Errorf("SRT read error: %v", err)
 		}
 
-		// TODO: process the incoming stream data (e.g., forward to FFmpeg)
-		fmt.Printf("Received %d bytes\n", n)
+		if _, err := stdin.Write(buf[:n]); err != nil {
+			stdin.Close()
+			if err := cmd.Wait(); err != nil {
+				return fmt.Errorf("FFmpeg exited with error: %v", err)
+			}
+			return fmt.Errorf("FFmpeg write error: %v", err)
+		}
 	}
 }
-
-
 
 
 
@@ -158,3 +213,18 @@ func getFreePort() (int, error) {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
+
+
+/*
+	TEST SCENARIOS: 
+		- Connection stopped with OBS
+		- Connection stopped with Stop_Stream
+		- Connection timeout
+		- Connection reconnect
+
+	Current results :
+		- Reconnection makes a new MP4 file as in the code 
+		- Connection stopped as expected on Stop_Stream (CommandContext of exec would SIGKILL the ffmpeg so the file is corrupted. Changed it to Command)
+		- Connection timeout works as expected on NO STREAMS
+		- Connection timeout works as expected on OBS TIMEOUT
+*/
