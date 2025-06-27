@@ -58,7 +58,7 @@ func handleStream(ctx context.Context, listener srt.Listener, task *Task) {
 			cancel() // Resourse Cleanup
 
 			if err != nil {
-				task.UpdateStatus(StreamStopped,fmt.Sprintf("Listener error: %s",err))
+				task.UpdateStatus(StreamStopped,fmt.Sprintf("%s",err))
 				return
 			}
 
@@ -113,9 +113,8 @@ func WaitForConnection(ctx context.Context, listener srt.Listener, task *Task) (
 			task.UpdateStatus(StreamStopped,"TIMEOUT")
 			return nil,ctx.Err()
 		}
-		task.UpdateStatus(StreamStopped,"User stopped the stream!")
 
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("connection canceled or user stopped the stream")
 
 	case res := <-resultCh:
 
