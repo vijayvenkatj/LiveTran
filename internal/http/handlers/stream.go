@@ -13,13 +13,29 @@ type Response struct {
 	Data    string `json:"data,omitempty"`
 }
 
+type StreamRequest struct {
+	StreamId	string	    `json:"stream_id"`
+	WebhookUrls  []string 	`json:"webhook_urls,omitempty"`
+}
+
 
 
 func (handler *Handler) StartStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	id := r.URL.Query().Get("id")
-	handler.tm.StartTask(id)
+	var streamBody StreamRequest
+
+	err := json.NewDecoder(r.Body).Decode(&streamBody)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{
+		Success: false,
+		Error: "Cannot read Request body!",
+		})
+		return
+	}
+
+	handler.tm.StartTask(streamBody.StreamId,streamBody.WebhookUrls)
 	
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
@@ -30,8 +46,19 @@ func (handler *Handler) StartStream(w http.ResponseWriter, r *http.Request) {
 func (handler *Handler) StopStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	id := r.URL.Query().Get("id")
-	handler.tm.StopTask(id,errors.New("user initiated request"))
+	var streamBody StreamRequest
+
+	err := json.NewDecoder(r.Body).Decode(&streamBody)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{
+		Success: false,
+		Error: "Cannot read Request body!",
+		})
+		return
+	}
+
+	handler.tm.StopTask(streamBody.StreamId,errors.New("user initiated request"))
 	
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
@@ -42,8 +69,19 @@ func (handler *Handler) StopStream(w http.ResponseWriter, r *http.Request) {
 func (handler *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type","application/json")
 
-	id := r.URL.Query().Get("id")
-	task,exists := handler.tm.TaskMap[id]
+	var streamBody StreamRequest
+
+	err := json.NewDecoder(r.Body).Decode(&streamBody)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{
+		Success: false,
+		Error: "Cannot read Request body!",
+		})
+		return
+	}
+
+	task,exists := handler.tm.TaskMap[streamBody.StreamId]
 	if exists {
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(Response{

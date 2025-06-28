@@ -1,8 +1,12 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"sync"
 )
 
@@ -10,10 +14,12 @@ type UpdateResponse struct {
 	Status 		string
 	Update	 	string
 }
+
 type Task struct {
 	mu 		    sync.Mutex
 	Id 			string
 	Status		string
+	Webhooks 	[]string
 	CancelFn	context.CancelCauseFunc
 	UpdatesChan	chan UpdateResponse
 }
@@ -51,7 +57,7 @@ func (task *Task) UpdateStatus(status string, update string) {
 
 
 // Starting a Task 
-func (tm *TaskManager) StartTask(id string) {
+func (tm *TaskManager) StartTask(id string,webhooks []string) {
 	tm.mu.Lock()
 	if _, exists := tm.TaskMap[id]; exists {
 		tm.mu.Unlock()
@@ -64,6 +70,7 @@ func (tm *TaskManager) StartTask(id string) {
 		Id:          id,
 		CancelFn:    cancelFunc,
 		Status:      StreamInit,
+		Webhooks: 	 webhooks,
 		UpdatesChan: make(chan UpdateResponse, 4),
 	}
 	tm.TaskMap[id] = task
@@ -72,8 +79,25 @@ func (tm *TaskManager) StartTask(id string) {
 	// Listen for updates
 	go func(updates <-chan UpdateResponse) {
 		for update := range updates {
-			fmt.Println("Update:", update.Update)
-			// TODO: sendWebhook
+
+			fmt.Println(update.Update)
+	
+			jsonData, err := json.Marshal(update)
+			if err != nil {
+				fmt.Println("Failed to send webhook:", err)
+				continue
+			}
+
+			for _,webhook := range task.Webhooks {
+				resp,err := http.Post(webhook,"application/json",bytes.NewBuffer(jsonData))
+				if err != nil {
+					fmt.Println("Failed to send webhook:", err)
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			}
+			
 		}
 	}(task.UpdatesChan)
 
