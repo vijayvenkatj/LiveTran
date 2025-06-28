@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/datarhei/gosrt"
@@ -34,13 +35,16 @@ func SrtConnectionTask(ctx context.Context,task *Task) {
 
 	task.UpdateStatus(StreamReady,fmt.Sprintf("The stream is ready! URL -> %s",url))
 
-	defer close(task.UpdatesChan)
 
-	handleStream(ctx,listener,task)
+	var wg sync.WaitGroup
+	handleStream(ctx,listener,task,&wg)
+	wg.Wait()
+
+	close(task.UpdatesChan)
 }
 
 
-func handleStream(ctx context.Context, listener srt.Listener, task *Task) {
+func handleStream(ctx context.Context, listener srt.Listener, task *Task,wg *sync.WaitGroup) {
 
 	for {
 
@@ -69,7 +73,7 @@ func handleStream(ctx context.Context, listener srt.Listener, task *Task) {
 			}
 			task.UpdateStatus(StreamActive,"OBS connected!")
 
-			err = ProcessStream(ctx,conn,task)
+			err = ProcessStream(ctx,conn,task,wg)
 			if err != nil {
 				task.UpdateStatus(StreamReady,fmt.Sprintf("Processing error: %s",err))
 				continue
@@ -133,7 +137,8 @@ func WaitForConnection(ctx context.Context, listener srt.Listener, task *Task) (
 
 
 
-func ProcessStream(ctx context.Context,conn srt.Conn,task *Task) error {
+func ProcessStream(ctx context.Context,conn srt.Conn,task *Task,wg *sync.WaitGroup) error {
+	wg.Add(1)
 	
 	cmd := exec.Command("ffmpeg",
 		"-f", "mpegts",
@@ -157,6 +162,7 @@ func ProcessStream(ctx context.Context,conn srt.Conn,task *Task) error {
 
 	go func(){
 		<- ctx.Done()
+		defer wg.Done()
 		task.UpdateStatus(StreamStopped,"User stopped the stream!")
 		stdin.Close()
 		conn.Close()

@@ -18,7 +18,7 @@ type Task struct {
 	mu 		    sync.Mutex
 	Id 			string
 	Status		string
-	Webhook 	string
+	Webhooks 	[]string
 	CancelFn	context.CancelCauseFunc
 	UpdatesChan	chan UpdateResponse
 }
@@ -69,7 +69,7 @@ func (tm *TaskManager) StartTask(id string) {
 		Id:          id,
 		CancelFn:    cancelFunc,
 		Status:      StreamInit,
-		Webhook: 	 "http://localhost:3000/api/webhooks/stream",
+		Webhooks: 	 []string{"http://localhost:3000/api/webhooks/stream"},
 		UpdatesChan: make(chan UpdateResponse, 4),
 	}
 	tm.TaskMap[id] = task
@@ -87,14 +87,15 @@ func (tm *TaskManager) StartTask(id string) {
 				continue
 			}
 
-			resp,err := http.Post(task.Webhook,"application/json",bytes.NewBuffer(jsonData))
-			if err != nil {
-				fmt.Println("Failed to send webhook:", err)
-				continue
-			}
-
-			_, _ = io.Copy(io.Discard, resp.Body)
+			for _,webhook := range task.Webhooks {
+				resp,err := http.Post(webhook,"application/json",bytes.NewBuffer(jsonData))
+				if err != nil {
+					fmt.Println("Failed to send webhook:", err)
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			}
 			
 		}
 	}(task.UpdatesChan)
