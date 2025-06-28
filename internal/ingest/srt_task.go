@@ -138,7 +138,6 @@ func WaitForConnection(ctx context.Context, listener srt.Listener, task *Task) (
 
 
 func ProcessStream(ctx context.Context,conn srt.Conn,task *Task,wg *sync.WaitGroup) error {
-	wg.Add(1)
 	
 	cmd := exec.Command("ffmpeg",
 		"-f", "mpegts",
@@ -160,6 +159,7 @@ func ProcessStream(ctx context.Context,conn srt.Conn,task *Task,wg *sync.WaitGro
 		return fmt.Errorf("FFmpeg start error: %s", err)
 	}
 
+	wg.Add(1)
 	go func(){
 		<- ctx.Done()
 		defer wg.Done()
