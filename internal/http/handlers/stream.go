@@ -14,8 +14,10 @@ type Response struct {
 }
 
 type StreamRequest struct {
-	StreamId	string	`json:"stream_id"`
+	StreamId	string	    `json:"stream_id"`
+	WebhookUrls  []string 	`json:"webhook_urls,omitempty"`
 }
+
 
 
 func (handler *Handler) StartStream(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +35,7 @@ func (handler *Handler) StartStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	handler.tm.StartTask(streamBody.StreamId)
+	handler.tm.StartTask(streamBody.StreamId,streamBody.WebhookUrls)
 	
 	json.NewEncoder(w).Encode(Response{
 		Success: true,
@@ -95,8 +97,6 @@ func (handler *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		Error: "Task not found",
 	})
 }
-
-
 
 
 /*

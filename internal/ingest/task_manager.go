@@ -14,6 +14,7 @@ type UpdateResponse struct {
 	Status 		string
 	Update	 	string
 }
+
 type Task struct {
 	mu 		    sync.Mutex
 	Id 			string
@@ -56,7 +57,7 @@ func (task *Task) UpdateStatus(status string, update string) {
 
 
 // Starting a Task 
-func (tm *TaskManager) StartTask(id string) {
+func (tm *TaskManager) StartTask(id string,webhooks []string) {
 	tm.mu.Lock()
 	if _, exists := tm.TaskMap[id]; exists {
 		tm.mu.Unlock()
@@ -69,7 +70,7 @@ func (tm *TaskManager) StartTask(id string) {
 		Id:          id,
 		CancelFn:    cancelFunc,
 		Status:      StreamInit,
-		Webhooks: 	 []string{"http://localhost:3000/api/webhooks/stream"},
+		Webhooks: 	 webhooks,
 		UpdatesChan: make(chan UpdateResponse, 4),
 	}
 	tm.TaskMap[id] = task
