@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -16,35 +19,29 @@ import (
 
 type Uploader interface {
 	Upload(ctx context.Context, bucket, key string, data []byte) error
+	UploadStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error
 }
 
 type CloudflareUploader struct {
 	client *s3.Client
 }
 
-
-
-func CreateCloudFlareUploader(accessKeyId string, accessKeySecret string, accountId string) (*CloudflareUploader,error) {
-
-	// TODO: Add timeout logic here
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+func CreateCloudFlareUploader(ctx context.Context, accessKeyId string, accessKeySecret string, accountId string) (*CloudflareUploader, error) {
+	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKeyId, accessKeySecret, "")),
 		config.WithRegion("auto"),
 	)
 	if err != nil {
 		fmt.Println(err)
-		return nil,err
+		return nil, err
 	}
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountId))
 	})
 
-	return &CloudflareUploader{client:client},nil
+	return &CloudflareUploader{client: client}, nil
 }
-
-
-
 
 func (uploader *CloudflareUploader) UploadStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error {
 	_, err := uploader.client.PutObject(ctx, &s3.PutObjectInput{
@@ -53,6 +50,8 @@ func (uploader *CloudflareUploader) UploadStream(ctx context.Context, bucket, ke
 		Body:        reader,
 		ContentType: aws.String(contentType),
 	})
+
+	// TODO: DELETE AFTER Uploading TS and m3u8
 	return err
 }
 
@@ -67,15 +66,12 @@ func detectContentType(key string) string {
 	}
 }
 
-
-
-func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context,outputDir string) {
-	
-	// Create a FSNOTIFY Watcher
+func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDir string, bucket string) {
+	var wg sync.WaitGroup
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return 
+		return
 	}
 	defer watcher.Close()
 
@@ -88,53 +84,80 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context,outputDir
 
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
+			wg.Wait()
 			return
 
-		case event, ok := <- watcher.Events:
-
-			if !ok {
-				return 
-			}
-
-			if event.Name == "" {
+		case event, ok := <-watcher.Events:
+			if !ok || event.Name == "" {
 				continue
 			}
 
-			// Handle .ts files: only on CREATE
+			key := filepath.Base(event.Name)
+			path := event.Name
+
+			// Handle TS files (on create only)
 			if strings.HasSuffix(event.Name, ".ts") && event.Op&fsnotify.Create == fsnotify.Create {
 				if seenTS[event.Name] {
 					continue
 				}
 				seenTS[event.Name] = true
 
-				file, err := os.Open(event.Name)
-				if err != nil {
-					fmt.Println("Issue uploading: ", event.Name)
-					continue
-				}
+				wg.Add(1)
+				go func(path, key string) {
+					defer wg.Done()
 
-				go uploader.UploadStream(ctx, "testing", event.Name, file, detectContentType(event.Name))
+					file, err := os.Open(path)
+					if err != nil {
+						fmt.Println("Issue uploading:", path)
+						return
+					}
+					defer file.Close()
 
-			// Handle .m3u8 files: on CREATE or WRITE
-			} else if strings.HasSuffix(event.Name, ".m3u8") && (event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Write == fsnotify.Write) {
-				
-				file, err := os.Open(event.Name)
-				if err != nil {
-					fmt.Println("Issue uploading: ", event.Name)
-					continue
-				}
+					contentType := detectContentType(key)
 
-				go uploader.UploadStream(ctx, "testing", event.Name, file, detectContentType(event.Name))
+					for i := 0; i < 3; i++ {
+						err = uploader.UploadStream(ctx, bucket, key, file, contentType)
+						if err == nil {
+							break
+						}
+						time.Sleep(time.Second * time.Duration(i+1)) // exponential backoff
+					}
+				}(path, key)
+			}
+
+			// Handle M3U8 files (on create or update)
+			if strings.HasSuffix(event.Name, ".m3u8") &&
+				(event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Write == fsnotify.Write) {
+
+				wg.Add(1)
+				go func(path, key string) {
+					defer wg.Done()
+
+					file, err := os.Open(path)
+					if err != nil {
+						fmt.Println("Issue uploading:", path)
+						return
+					}
+					defer file.Close()
+
+					contentType := detectContentType(key)
+
+					for i := 0; i < 3; i++ {
+						err = uploader.UploadStream(ctx, bucket, key, file, contentType)
+						if err == nil {
+							break
+						}
+						time.Sleep(time.Second * time.Duration(i+1))
+					}
+				}(path, key)
 			}
 
 		case err, ok := <-watcher.Errors:
-			
 			if !ok {
-				return 
+				return
 			}
-
-			fmt.Println("ERROR:",err)
+			fmt.Println("ERROR:", err)
 		}
 	}
 }

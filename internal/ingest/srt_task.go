@@ -41,13 +41,13 @@ func SrtConnectionTask(ctx context.Context,task *Task) {
 	accessKey := config.GetEnv("R2_ACCESS_KEY")
 	secretKey := config.GetEnv("R2_SECRET_KEY")
 
-	uploader, err := upload.CreateCloudFlareUploader(accessKey,secretKey,accountId)
+	uploader, err := upload.CreateCloudFlareUploader(ctx,accessKey,secretKey,accountId)
 	if err != nil {
 		task.UpdateStatus(StreamStopped, fmt.Sprintf("Failed to initialise Uploader : %s",err))
 		return
 	}
 
-	go uploader.WatchAndUpload(ctx,"output")
+	go uploader.WatchAndUpload(ctx,"output","testing")
 
 	var wg sync.WaitGroup
 	handleStream(ctx,listener,task,&wg)
