@@ -107,6 +107,7 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDi
 				go func(path, key string) {
 					defer wg.Done()
 
+					time.Sleep(200 * time.Millisecond)
 					file, err := os.Open(path)
 					if err != nil {
 						fmt.Println("Issue uploading:", path)
@@ -119,6 +120,7 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDi
 					for i := 0; i < 3; i++ {
 						err = uploader.UploadStream(ctx, bucket, key, file, contentType)
 						if err == nil {
+							fmt.Println("Upload Successful",key)
 							break
 						}
 						time.Sleep(time.Second * time.Duration(i+1)) // exponential backoff
@@ -134,6 +136,7 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDi
 				go func(path, key string) {
 					defer wg.Done()
 
+					time.Sleep(200 * time.Millisecond)
 					file, err := os.Open(path)
 					if err != nil {
 						fmt.Println("Issue uploading:", path)
@@ -146,6 +149,7 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDi
 					for i := 0; i < 3; i++ {
 						err = uploader.UploadStream(ctx, bucket, key, file, contentType)
 						if err == nil {
+							fmt.Println("Upload Successful",key)
 							break
 						}
 						time.Sleep(time.Second * time.Duration(i+1))
