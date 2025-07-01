@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/datarhei/gosrt"
+	"github.com/vijayvenkatj/LiveTran/internal/config"
+	"github.com/vijayvenkatj/LiveTran/internal/upload"
 )
 
 
@@ -35,6 +37,17 @@ func SrtConnectionTask(ctx context.Context,task *Task) {
 
 	task.UpdateStatus(StreamReady,fmt.Sprintf("The stream is ready! URL -> %s",url))
 
+	accountId := config.GetEnv("R2_ACCOUNT_ID")
+	accessKey := config.GetEnv("R2_ACCESS_KEY")
+	secretKey := config.GetEnv("R2_SECRET_KEY")
+
+	uploader, err := upload.CreateCloudFlareUploader(accessKey,secretKey,accountId)
+	if err != nil {
+		task.UpdateStatus(StreamStopped, fmt.Sprintf("Failed to initialise Uploader : %s",err))
+		return
+	}
+
+	go uploader.WatchAndUpload(ctx,"output")
 
 	var wg sync.WaitGroup
 	handleStream(ctx,listener,task,&wg)
