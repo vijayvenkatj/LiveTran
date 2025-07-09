@@ -28,9 +28,11 @@ func (a *APIServer) StartAPIServer(tm *ingest.TaskManager) error {
 	routeHandler := handlers.NewHandler(tm)
 
 	streamRoutes := routeHandler.StreamRoutes()
+	videoRoutes := routeHandler.VideoRoutes()
 
 	router := http.NewServeMux()
 	router.Handle("/api/",http.StripPrefix("/api",streamRoutes))
+	router.Handle("/video/",http.StripPrefix("/video/",videoRoutes))
 
 	fmt.Println("Server is listening on port",a.address)
 	return http.ListenAndServe(a.address,router)

@@ -108,6 +108,7 @@ func (uploader *CloudflareUploader) WatchAndUpload(ctx context.Context, outputDi
 					defer wg.Done()
 
 					time.Sleep(200 * time.Millisecond)
+					// TODO: Add a better solution for checking file
 					file, err := os.Open(path)
 					if err != nil {
 						fmt.Println("Issue uploading:", path)
