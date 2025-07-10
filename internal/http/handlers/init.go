@@ -33,6 +33,15 @@ func (h *Handler) StreamRoutes() http.Handler {
 	return handler
 }
 
+func (h *Handler) VideoRoutes() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /",h.GetVideoChunks)
+
+	handler := middlewares.CORSMiddleware(mux)
+
+	return handler
+}
 /*
 	This File manages all the SubRouters 
 	Flow : 
