@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 )
 
 type Response struct {
@@ -98,6 +100,35 @@ func (handler *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (handler *Handler) GetVideoChunks(w http.ResponseWriter, r *http.Request) {
+	// TODO: Write a function to read and stream HLS Chunks from the output dir (Temp) using HTTP/2
+
+	filePath := filepath.Join("output",r.URL.Path)
+	
+	file, err := os.Open(filePath)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{
+			Success: false,
+			Error: "Error accessing file",
+		})
+		return
+	}
+	defer file.Close()
+
+	if filepath.Ext(filePath) == ".m3u8" {
+        w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+    } else if filepath.Ext(filePath) == ".ts" {
+        w.Header().Set("Content-Type", "video/MP2T")
+    }
+
+	w.Header().Set("Accept-Ranges", "bytes") // Allowing for partial requests to be done
+
+	info, _ := file.Stat()
+	modtime := info.ModTime() // This is to control caching
+	http.ServeContent(w, r, filepath.Base(filePath), modtime , file)
+}
 
 /*
 	TODO:
