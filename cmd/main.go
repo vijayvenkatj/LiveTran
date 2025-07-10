@@ -21,7 +21,7 @@ func main() {
 	apiServer := api.NewAPIServer(":8080")
 	err := apiServer.StartAPIServer(tm);
 	if err != nil {
-		fmt.Println("Error starting server")
+		fmt.Println("Error starting server: ",err)
 		return
 	}
 }

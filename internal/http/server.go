@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 
@@ -32,9 +33,19 @@ func (a *APIServer) StartAPIServer(tm *ingest.TaskManager) error {
 
 	router := http.NewServeMux()
 	router.Handle("/api/",http.StripPrefix("/api",streamRoutes))
-	router.Handle("/video/",http.StripPrefix("/video/",videoRoutes))
+	router.Handle("/video/",http.StripPrefix("/video",videoRoutes))
 
 	fmt.Println("Server is listening on port",a.address)
-	return http.ListenAndServe(a.address,router)
+
+	server := &http.Server{
+		Addr:    a.address,
+		Handler: router,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			// HTTP/2 is enabled by default in Go with TLS >= 1.2 ( We need this for efficient HLS )
+		},
+	}
+
+	return server.ListenAndServeTLS("keys/localhost.pem", "keys/localhost-key.pem") // TODO: Replace with valid prod secrets
 
 }
