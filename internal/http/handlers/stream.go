@@ -107,6 +107,7 @@ func (handler *Handler) GetVideoChunks(w http.ResponseWriter, r *http.Request) {
 	
 	file, err := os.Open(filePath)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{
 			Success: false,
